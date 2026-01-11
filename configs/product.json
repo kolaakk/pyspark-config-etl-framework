@@ -1,0 +1,24 @@
+{
+    "job_name": "silver_products",
+    "source": {
+      "format": "parquet",
+      "path": "/mnt/landing/products/",
+      "options": {}
+    },
+    "transform": {
+      "function": "transformations.product.transform",
+      "params": {
+        "currency": "EUR"
+      }
+    },
+    "target": {
+      "mode": "overwrite",
+      "table": "silver.products",
+      "path": null,
+      "partition_by": ["category_partition"],
+      "overwrite_schema": true
+    },
+    "required_columns": ["product_id", "product_name", "product_price", "product_Category"],
+    "drop_duplicates_on": ["product_id"]
+  }
+  
