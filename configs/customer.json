@@ -1,0 +1,22 @@
+{
+    "job_name": "silver_customers",
+    "source": {
+      "format": "parquet",
+      "path": "/mnt/landing/customers/",
+      "options": {}
+    },
+    "transform": {
+      "function": "transformations.customer.transform",
+      "params": {}
+    },
+    "target": {
+      "mode": "append",
+      "table": "silver.customers",
+      "path": null,
+      "partition_by": ["country_partition"],
+      "overwrite_schema": false
+    },
+    "required_columns": ["customer_id", "customer_name", "email", "country"],
+    "drop_duplicates_on": ["customer_id"]
+  }
+  

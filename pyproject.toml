@@ -1,0 +1,20 @@
+
+---
+
+## `pyproject.toml`
+
+```toml
+[project]
+name = "pyspark-config-etl-framework"
+version = "0.1.0"
+description = "Config-driven PySpark ETL framework with Delta support"
+requires-python = ">=3.9"
+dependencies = [
+  "pyspark>=3.3.0"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
