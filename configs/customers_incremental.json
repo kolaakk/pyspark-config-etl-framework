@@ -1,0 +1,30 @@
+{
+    "job_name": "silver_customers_incremental",
+    "source": {
+      "format": "parquet",
+      "path": "/mnt/landing/customers/",
+      "options": {}
+    },
+    "transform": {
+      "function": "transformations.customer.transform",
+      "params": {}
+    },
+    "watermark": {
+      "enabled": true,
+      "column": "updated_at",
+      "initial_value": "1970-01-01 00:00:00",
+      "metadata_table": "etl_metadata.watermarks",
+      "job_key": "customers"
+    },
+    "target": {
+      "write_strategy": "merge_scd1",
+      "table": "silver.customers",
+      "merge_scd1": {
+        "keys": ["customer_id"],
+        "hashdiff_enabled": true,
+        "hashdiff_columns": ["customer_name", "email", "country"],
+        "soft_delete": true
+      }
+    }
+  }
+  

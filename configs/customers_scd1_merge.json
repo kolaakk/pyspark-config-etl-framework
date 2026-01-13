@@ -1,0 +1,31 @@
+{
+    "job_name": "silver_customers_scd1",
+    "source": {
+      "format": "parquet",
+      "path": "/mnt/landing/customers/",
+      "options": {}
+    },
+    "transform": {
+      "function": "transformations.customer.transform",
+      "params": {}
+    },
+    "target": {
+      "write_strategy": "merge_scd1",
+      "table": "silver.customers",
+      "path": null,
+      "partition_by": ["country_partition"],
+      "merge_scd1": {
+        "keys": ["customer_id"],
+        "hashdiff_enabled": true,
+        "hashdiff_columns": ["customer_name", "email", "country"],
+        "soft_delete": true,
+        "soft_delete_column": "is_deleted",
+        "soft_delete_ts_column": "deleted_ts",
+        "update_columns": [],
+        "insert_columns": []
+      }
+    },
+    "required_columns": ["customer_id", "customer_name", "email", "country"],
+    "drop_duplicates_on": ["customer_id"]
+  }
+  
