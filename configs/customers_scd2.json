@@ -1,0 +1,31 @@
+{
+    "job_name": "silver_customers_scd2",
+    "source": {
+      "format": "parquet",
+      "path": "/mnt/landing/customers/",
+      "options": {}
+    },
+    "transform": {
+      "function": "transformations.customer.transform",
+      "params": {}
+    },
+    "target": {
+      "write_strategy": "scd2",
+      "table": "silver.customers_scd2",
+      "path": null,
+      "partition_by": ["country_partition"],
+      "scd2": {
+        "keys": ["customer_id"],
+        "tracked_columns": ["customer_name", "email", "country"],
+        "effective_from_col": "effective_from",
+        "effective_to_col": "effective_to",
+        "is_current_col": "is_current",
+        "soft_delete_column": "is_deleted",
+        "soft_delete_ts_column": "deleted_ts",
+        "soft_delete_missing": true
+      }
+    },
+    "required_columns": ["customer_id", "customer_name", "email", "country"],
+    "drop_duplicates_on": ["customer_id"]
+  }
+  
