@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import List, Dict, Any
+
 
 
 @dataclass
@@ -78,6 +81,16 @@ class TargetConfig:
     merge_scd1: MergeSCD1Config = field(default_factory=MergeSCD1Config)
     scd2: SCD2Config = field(default_factory=SCD2Config)
 
+@dataclass
+class DQConfig:
+    enabled: bool = False
+    dataset: str = ""                 # logical dataset name (e.g. "customers")
+    results_db: str = "dq"
+    fail_fast: bool = False
+    failed_sample_limit: int = 50
+
+    pre_checks: List[Dict[str, Any]] = field(default_factory=list)
+    post_checks: List[Dict[str, Any]] = field(default_factory=list)
 
 @dataclass
 class JobConfig:
@@ -86,9 +99,13 @@ class JobConfig:
     transform: TransformConfig
     target: TargetConfig
     watermark: WatermarkConfig = field(default_factory=WatermarkConfig)
+    dq: DQConfig = field(default_factory=DQConfig)
+
 
     required_columns: List[str] = field(default_factory=list)
     drop_duplicates_on: List[str] = field(default_factory=list)
+
+
 
 
 def load_config(config_path: str) -> JobConfig:
@@ -97,6 +114,7 @@ def load_config(config_path: str) -> JobConfig:
 
     raw_target = raw["target"]
     raw_wm = raw.get("watermark", {})
+    dq_raw = raw.get("dq", {})
 
     scd1_raw = raw_target.get("merge_scd1", {})
     scd2_raw = raw_target.get("scd2", {})
@@ -120,12 +138,25 @@ def load_config(config_path: str) -> JobConfig:
         job_key=raw_wm.get("job_key"),
     )
 
+    
+    dq = DQConfig(
+        enabled=dq_raw.get("enabled", False),
+        dataset=dq_raw.get("dataset", raw.get("job_name", "")),
+        results_db=dq_raw.get("results_db", "dq"),
+        fail_fast=dq_raw.get("fail_fast", False),
+        failed_sample_limit=int(dq_raw.get("failed_sample_limit", 50)),
+        pre_checks=dq_raw.get("pre_checks", []),
+        post_checks=dq_raw.get("post_checks", []),
+    )
+
+
     return JobConfig(
         job_name=raw["job_name"],
         source=SourceConfig(**raw["source"]),
         transform=TransformConfig(**raw["transform"]),
         target=target,
         watermark=wm,
+        dq=dq,
         required_columns=raw.get("required_columns", []),
         drop_duplicates_on=raw.get("drop_duplicates_on", []),
     )

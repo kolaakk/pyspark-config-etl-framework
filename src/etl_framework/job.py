@@ -9,6 +9,8 @@ from etl_framework.strategies.write_strategy import run_write
 from etl_framework.strategies.merge_scd1 import run_merge_scd1
 from etl_framework.strategies.merge_scd2 import run_scd2
 from etl_framework.watermark import read_watermark, write_watermark
+from etl_framework.dq.runner import DQRunner
+
 
 
 class SparkETLJob:
@@ -25,8 +27,12 @@ class SparkETLJob:
 
         df_out = self._apply_transform(df_in)
         df_out = self._post_transform(df_out)
+        # DQ PRE
+        self._run_dq(stage="pre", df=df_out, source_df=df_in)
 
         self._write_by_strategy(df_out)
+        # DQ POST (optional): run on same df_out or reload from target
+        self._run_dq(stage="post", df=df_out, source_df=df_in)
 
         self._update_watermark(df_in)
 
@@ -98,6 +104,37 @@ class SparkETLJob:
         if max_val is not None:
             write_watermark(self.spark, wm.metadata_table, job_key, str(max_val))
             self._log(f"Watermark updated to: {max_val}")
+           
+    def _run_dq(self, stage: str, df: DataFrame, source_df: DataFrame) -> None:
+        if not self.config.dq.enabled:
+            return
 
+        checks = self.config.dq.pre_checks if stage == "pre" else self.config.dq.post_checks
+        if not checks:
+            return
+
+        target_ref = {"table": self.config.target.table, "path": self.config.target.path}
+
+        runner = DQRunner(
+            self.spark,
+            results_db=self.config.dq.results_db,
+            fail_fast=self.config.dq.fail_fast,
+            failed_sample_limit=self.config.dq.failed_sample_limit,
+        )
+
+        runner.run_checks(
+            df=df,
+            source_df=source_df,
+            target_ref=target_ref,
+            job_name=self.config.job_name,
+            dataset=self.config.dq.dataset,
+            stage=stage,
+            checks=checks,
+        )
+
+    
     def _log(self, msg: str) -> None:
         print(f"[{self.config.job_name}] {msg}")
+    
+    
+

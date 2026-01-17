@@ -1,31 +1,76 @@
 {
-    "job_name": "silver_customers_scd1",
-    "source": {
-      "format": "parquet",
-      "path": "/mnt/landing/customers/",
-      "options": {}
-    },
-    "transform": {
-      "function": "transformations.customer.transform",
-      "params": {}
-    },
-    "target": {
-      "write_strategy": "merge_scd1",
-      "table": "silver.customers",
-      "path": null,
-      "partition_by": ["country_partition"],
-      "merge_scd1": {
-        "keys": ["customer_id"],
-        "hashdiff_enabled": true,
-        "hashdiff_columns": ["customer_name", "email", "country"],
-        "soft_delete": true,
-        "soft_delete_column": "is_deleted",
-        "soft_delete_ts_column": "deleted_ts",
-        "update_columns": [],
-        "insert_columns": []
+  "job_name": "silver_customers_scd1",
+  "source": { "format": "parquet", "path": "/mnt/landing/customers/", "options": {} },
+  "transform": { "function": "transformations.customer.transform", "params": {} },
+
+  "target": {
+    "write_strategy": "merge_scd1",
+    "table": "silver.customers",
+    "path": null,
+    "partition_by": ["country_partition"],
+    "merge_scd1": {
+      "keys": ["customer_id"],
+      "hashdiff_enabled": true,
+      "hashdiff_columns": ["customer_name", "email", "country"],
+      "soft_delete": true
+    }
+  },
+
+  "dq": {
+    "enabled": true,
+    "dataset": "customers",
+    "results_db": "dq",
+    "fail_fast": false,
+    "failed_sample_limit": 100,
+
+    "pre_checks": [
+      {
+        "type": "load_completeness",
+        "name": "min_rows",
+        "params": { "min_rows": 1, "severity": "HIGH" }
+      },
+      {
+        "type": "uniqueness",
+        "name": "pk_unique",
+        "params": { "keys": ["customer_id"], "severity": "CRITICAL" }
+      },
+      {
+        "type": "business_validity",
+        "name": "business_rules",
+        "params": {
+          "severity": "HIGH",
+          "rules": [
+            { "name": "email_present", "condition": "email IS NOT NULL", "max_fail_rate": 0.01 },
+            { "name": "country_present", "condition": "country IS NOT NULL", "max_fail_rate": 0.01 }
+          ]
+        }
+      },
+      {
+        "type": "privacy_gdpr",
+        "name": "gdpr_checks",
+        "params": {
+          "banned_columns": ["ssn", "passport_number"],
+          "masking": [
+            { "col": "email", "regex": "^[^@]+@[^@]+\\.[^@]+$", "must_match": true }
+          ]
+        }
       }
-    },
-    "required_columns": ["customer_id", "customer_name", "email", "country"],
-    "drop_duplicates_on": ["customer_id"]
-  }
-  
+    ],
+
+    "post_checks": [
+      {
+        "type": "delta_integrity",
+        "name": "delta_target_exists",
+        "params": { "severity": "HIGH" }
+      },
+      {
+        "type": "timeliness_sla",
+        "name": "freshness",
+        "params": { "timestamp_column": "_ingest_ts", "max_age_minutes": 240, "severity": "MEDIUM" }
+      }
+    ]
+  },
+
+  "required_columns": ["customer_id", "customer_name", "email", "country"],
+  "drop_duplicates_on": ["customer_id"]
+}
