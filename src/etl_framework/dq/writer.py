@@ -38,3 +38,16 @@ def append_failed_records(
         .withColumn("written_ts", F.current_timestamp())
         .write.format("delta").mode("append").saveAsTable(failed_table)
     )
+    
+def append_dashboard(
+    spark: SparkSession,
+    dashboard_df: DataFrame,
+    dashboard_table: str,
+) -> None:
+    if "." in dashboard_table:
+        _ensure_db(spark, dashboard_table.split(".", 1)[0])
+    (
+        dashboard_df
+        .withColumn("written_ts", F.current_timestamp())
+        .write.format("delta").mode("append").saveAsTable(dashboard_table)
+    )

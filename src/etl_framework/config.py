@@ -80,14 +80,46 @@ class TargetConfig:
 
     merge_scd1: MergeSCD1Config = field(default_factory=MergeSCD1Config)
     scd2: SCD2Config = field(default_factory=SCD2Config)
+    
+# DQ config models (governance + scoring + quarantine)
+@dataclass
+class DQNaming:
+    prefix_template: str = "dq_{layer}_{dataset}"
+
+@dataclass
+class DQScoring:
+    severity_weights: Dict[str, float] = field(default_factory=lambda: {
+        "LOW": 1, "MEDIUM": 3, "HIGH": 7, "CRITICAL": 10
+    })
+    status_multipliers: Dict[str, float] = field(default_factory=lambda: {
+        "PASS": 0, "WARN": 0.5, "FAIL": 1
+    })  
+
+@dataclass
+class DQQuarantine:
+    enabled: bool = False
+    database: str = "quarantine"
+    table_template: str = "{layer}_{dataset}"
+    max_rows_per_run: int = 5000
+
+@dataclass
+class DQRuleSetRef:
+    rule_set_id: str = ""
+    version: int = 1
 
 @dataclass
 class DQConfig:
     enabled: bool = False
     dataset: str = ""                 # logical dataset name (e.g. "customers")
     results_db: str = "dq"
+    layer: str = ""                  # data layer (e.g. "raw", "silver", "gold")
     fail_fast: bool = False
     failed_sample_limit: int = 50
+    naming: DQNaming = field(default_factory=DQNaming)
+    enforce_approved_rule_set: bool = False
+    rule_set: Optional[DQRuleSetRef] = None
+    scoring: DQScoring = field(default_factory=DQScoring)
+    quarantine: DQQuarantine = field(default_factory=DQQuarantine)
 
     pre_checks: List[Dict[str, Any]] = field(default_factory=list)
     post_checks: List[Dict[str, Any]] = field(default_factory=list)
@@ -106,12 +138,12 @@ class JobConfig:
     drop_duplicates_on: List[str] = field(default_factory=list)
 
 
-
+# Load config from JSON
 
 def load_config(config_path: str) -> JobConfig:
     with open(config_path, "r", encoding="utf-8") as f:
         raw = json.load(f)
-
+# ---- TARGET ----
     raw_target = raw["target"]
     raw_wm = raw.get("watermark", {})
     dq_raw = raw.get("dq", {})
@@ -138,12 +170,55 @@ def load_config(config_path: str) -> JobConfig:
         job_key=raw_wm.get("job_key"),
     )
 
-    
+    # nested: naming
+    naming_raw = dq_raw.get("naming", {}) or {}
+    naming = DQNaming(
+        prefix_template=naming_raw.get("prefix_template", "dq_{layer}_{dataset}")
+    )
+
+    # nested: scoring
+    scoring_raw = dq_raw.get("scoring", {}) or {}
+    scoring = DQScoring(
+        severity_weights=scoring_raw.get("severity_weights", {
+            "LOW": 1, "MEDIUM": 3, "HIGH": 7, "CRITICAL": 10
+        }),
+        status_multipliers=scoring_raw.get("status_multipliers", {
+            "PASS": 0, "WARN": 0.5, "FAIL": 1
+        }),
+    )
+
+    # nested: quarantine
+    quarantine_raw = dq_raw.get("quarantine", {}) or {}
+    quarantine = DQQuarantine(
+        enabled=bool(quarantine_raw.get("enabled", False)),
+        database=quarantine_raw.get("database", "quarantine"),
+        table_template=quarantine_raw.get("table_template", "{layer}_{dataset}"),
+        max_rows_per_run=int(quarantine_raw.get("max_rows_per_run", 5000)),
+    )
+
+    # nested: rule_set
+    rule_set_raw = dq_raw.get("rule_set")
+    rule_set = None
+    if isinstance(rule_set_raw, dict):
+        rule_set = DQRuleSetRef(
+            rule_set_id=rule_set_raw.get("rule_set_id", ""),
+            version=int(rule_set_raw.get("version", 1)),
+        )
+        # if empty id, treat as None
+        if not rule_set.rule_set_id:
+            rule_set = None
+
     dq = DQConfig(
-        enabled=dq_raw.get("enabled", False),
+        enabled=bool(dq_raw.get("enabled", False)),
+        layer=dq_raw.get("layer", ""),
         dataset=dq_raw.get("dataset", raw.get("job_name", "")),
+        naming=naming,
+        enforce_approved_rule_set=bool(dq_raw.get("enforce_approved_rule_set", False)),
         results_db=dq_raw.get("results_db", "dq"),
-        fail_fast=dq_raw.get("fail_fast", False),
+        rule_set=rule_set,
+        scoring=scoring,
+        quarantine=quarantine,
+        fail_fast=bool(dq_raw.get("fail_fast", False)),
         failed_sample_limit=int(dq_raw.get("failed_sample_limit", 50)),
         pre_checks=dq_raw.get("pre_checks", []),
         post_checks=dq_raw.get("post_checks", []),
