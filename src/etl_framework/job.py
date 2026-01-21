@@ -106,29 +106,37 @@ class SparkETLJob:
             self._log(f"Watermark updated to: {max_val}")
            
     def _run_dq(self, stage: str, df: DataFrame, source_df: DataFrame) -> None:
-        if not self.config.dq.enabled:
+        """
+        Runs DQ checks for the given stage ("pre" or "post") if enabled in config.
+        Writes:
+          - per-category results tables
+          - per-category failed samples
+          - consolidated dashboard
+          - quarantine (optional)
+        """
+        if not getattr(self.config, "dq", None) or not self.config.dq.enabled:
             return
 
+        # Validate required fields for naming
+        if not self.config.dq.layer or not self.config.dq.dataset:
+            raise ValueError("DQ is enabled but dq.layer or dq.dataset is missing in config.")
+
         checks = self.config.dq.pre_checks if stage == "pre" else self.config.dq.post_checks
-        if not checks:
-            return
+        # If you rely fully on governance rule sets, checks may be empty; that's OK.
+        # The DQRunner will load checks from governance if dq.rule_set is present.
 
         target_ref = {"table": self.config.target.table, "path": self.config.target.path}
 
-        runner = DQRunner(
-            self.spark,
-            results_db=self.config.dq.results_db,
-            fail_fast=self.config.dq.fail_fast,
-            failed_sample_limit=self.config.dq.failed_sample_limit,
-        )
-
+        runner = DQRunner(self.spark)
         runner.run_checks(
             df=df,
             source_df=source_df,
             target_ref=target_ref,
             job_name=self.config.job_name,
+            layer=self.config.dq.layer,
             dataset=self.config.dq.dataset,
             stage=stage,
+            dq_config=self.config.dq,
             checks=checks,
         )
 

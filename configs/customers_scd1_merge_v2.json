@@ -1,0 +1,71 @@
+{
+    "job_name": "silver_customers_scd1",
+  
+    "source": {
+      "format": "parquet",
+      "path": "/mnt/landing/customers/",
+      "options": {}
+    },
+  
+    "transform": {
+      "function": "transformations.customer.transform",
+      "params": {}
+    },
+  
+    "target": {
+      "write_strategy": "merge_scd1",
+      "table": "silver.customers",
+      "merge_scd1": {
+        "keys": ["customer_id"],
+        "hashdiff_enabled": true,
+        "hashdiff_columns": ["customer_name", "email", "country"],
+        "soft_delete": true
+      }
+    },
+  
+    "dq": {
+      "enabled": true,
+      "layer": "silver",
+      "dataset": "customers",
+  
+      "enforce_approved_rule_set": true,
+      "rule_set": {
+        "rule_set_id": "customers_base",
+        "version": 3
+      },
+  
+      "naming": {
+        "prefix_template": "dq_{layer}_{dataset}"
+      },
+  
+      "scoring": {
+        "severity_weights": {
+          "LOW": 1,
+          "MEDIUM": 3,
+          "HIGH": 7,
+          "CRITICAL": 10
+        },
+        "status_multipliers": {
+          "PASS": 0,
+          "WARN": 0.5,
+          "FAIL": 1
+        }
+      },
+  
+      "quarantine": {
+        "enabled": true,
+        "database": "quarantine",
+        "table_template": "{layer}_{dataset}",
+        "max_rows_per_run": 5000
+      },
+  
+      "failed_sample_limit": 200,
+  
+      "pre_checks": [],
+      "post_checks": []
+    },
+  
+    "required_columns": ["customer_id", "customer_name", "email", "country"],
+    "drop_duplicates_on": ["customer_id"]
+  }
+  
