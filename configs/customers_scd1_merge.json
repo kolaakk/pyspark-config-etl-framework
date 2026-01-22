@@ -23,6 +23,27 @@
     "fail_fast": false,
     "failed_sample_limit": 100,
 
+    "enforce_approved_rule_set": false,
+    "rule_set": {
+    "rule_set_id": "",
+    "version": 1
+     },
+    "naming": { "prefix_template": "dq_{layer}_{dataset}" },
+
+    "scoring": {
+      "severity_weights": { "LOW": 1, "MEDIUM": 3, "HIGH": 7, "CRITICAL": 10 },
+      "status_multipliers": { "PASS": 0, "WARN": 0.5, "FAIL": 1 }
+     },
+
+    "publish_guard": { "enabled": true, "block_on_post_fail": true }, 
+    
+    "quarantine": {
+      "enabled": true,
+      "database": "quarantine",
+      "table_template": "{layer}_{dataset}",
+      "max_rows_per_run": 5000
+     },
+
     "pre_checks": [
       {
         "type": "load_completeness",

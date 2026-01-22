@@ -25,6 +25,54 @@
         "soft_delete_missing": true
       }
     },
+    
+    "dq": {
+      "enabled": true,
+      "layer": "silver",
+      "dataset": "customers",
+    
+      "enforce_approved_rule_set": true,
+      "rule_set": {
+        "rule_set_id": "",
+        "version": 1
+      },
+    
+      "naming": {
+        "prefix_template": "dq_{layer}_{dataset}"
+      },
+    
+      "scoring": {
+        "severity_weights": {
+          "LOW": 1,
+          "MEDIUM": 3,
+          "HIGH": 7,
+          "CRITICAL": 10
+        },
+        "status_multipliers": {
+          "PASS": 0,
+          "WARN": 0.5,
+          "FAIL": 1
+        }
+      },
+    
+      "quarantine": {
+        "enabled": true,
+        "database": "quarantine",
+        "table_template": "{layer}_{dataset}",
+        "max_rows_per_run": 5000
+      },
+    
+      "failed_sample_limit": 200,
+    
+      "publish_guard": {
+        "enabled": true,
+        "block_on_post_fail": true
+      },
+    
+      "pre_checks": [],
+      "post_checks": []
+    },
+    
     "required_columns": ["customer_id", "customer_name", "email", "country"],
     "drop_duplicates_on": ["customer_id"]
   }
