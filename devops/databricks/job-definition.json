@@ -1,0 +1,17 @@
+{
+    "name": "__JOB_NAME__",
+    "tasks": [
+      {
+        "task_key": "run_etl",
+        "existing_cluster_id": "__CLUSTER_ID__",
+        "libraries": [
+          { "whl": "__WHEEL_DBFS_PATH__" }
+        ],
+        "spark_python_task": {
+          "python_file": "dbfs:/FileStore/etl/entrypoints/run_etl.py",
+          "parameters": ["__CONFIG_DBFS_PATH__"]
+        }
+      }
+    ]
+  }
+  

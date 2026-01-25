@@ -1,0 +1,68 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  # Artifact name
+  ARTIFACT_NAME: "etl_artifact"
+
+  # Wheel dist folder name
+  DIST_DIR: "dist"
+
+  # Databricks job name base
+  DATABRICKS_JOB_NAME: "pyspark-config-etl-framework"
+
+  # Config file to run (relative inside artifact)
+  CONFIG_REL_PATH: "configs/ENV/customers_scd1_merge.json"
+
+stages:
+  - stage: Build
+    displayName: "Build & Publish Artifact"
+    jobs:
+      - job: BuildJob
+        displayName: "Build wheel + package configs"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - template: devops/templates/steps-build-artifact.yml
+            parameters:
+              artifactName: "$(ARTIFACT_NAME)"
+              distDir: "$(DIST_DIR)"
+
+  - template: devops/templates/stage-deploy-databricks.yml
+    parameters:
+      stageName: Dev
+      environmentName: dev
+      artifactName: "$(ARTIFACT_NAME)"
+      databricksJobName: "$(DATABRICKS_JOB_NAME)"
+      configRelPath: "configs/dev/customers_scd1_merge.json"
+
+  - template: devops/templates/stage-deploy-databricks.yml
+    parameters:
+      stageName: Test
+      environmentName: test
+      artifactName: "$(ARTIFACT_NAME)"
+      databricksJobName: "$(DATABRICKS_JOB_NAME)"
+      configRelPath: "configs/test/customers_scd1_merge.json"
+
+  - template: devops/templates/stage-deploy-databricks.yml
+    parameters:
+      stageName: Acceptance
+      environmentName: acc
+      artifactName: "$(ARTIFACT_NAME)"
+      databricksJobName: "$(DATABRICKS_JOB_NAME)"
+      configRelPath: "configs/acc/customers_scd1_merge.json"
+
+  - template: devops/templates/stage-deploy-databricks.yml
+    parameters:
+      stageName: Production
+      environmentName: prod
+      artifactName: "$(ARTIFACT_NAME)"
+      databricksJobName: "$(DATABRICKS_JOB_NAME)"
+      configRelPath: "configs/prod/customers_scd1_merge.json"

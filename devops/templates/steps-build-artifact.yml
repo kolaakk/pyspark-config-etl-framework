@@ -1,0 +1,28 @@
+parameters:
+  artifactName: ""
+  distDir: ""
+
+steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.10"
+    displayName: "Use Python 3.10"
+
+  - script: |
+      python -m pip install --upgrade pip
+      pip install build
+    displayName: "Install build tooling"
+
+  - script: |
+      python -m build --wheel
+      ls -lah dist
+    displayName: "Build wheel"
+
+  - script: |
+      chmod +x devops/scripts/package_artifact.sh
+      devops/scripts/package_artifact.sh "$(Build.SourcesDirectory)" "$(Build.ArtifactStagingDirectory)"
+    displayName: "Package artifact (wheel + configs + databricks assets)"
+
+  - publish: "$(Build.ArtifactStagingDirectory)"
+    artifact: ${{ parameters.artifactName }}
+    displayName: "Publish artifact"

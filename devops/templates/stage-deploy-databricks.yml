@@ -1,0 +1,76 @@
+parameters:
+  stageName: ""
+  environmentName: ""
+  artifactName: ""
+  databricksJobName: ""
+  configRelPath: ""
+
+stages:
+  - stage: ${{ parameters.stageName }}
+    displayName: "Deploy & Run on Databricks (${{ parameters.environmentName }})"
+    dependsOn: Build
+    jobs:
+      - deployment: DeployDatabricks
+        displayName: "Deploy to Databricks"
+        environment: ${{ parameters.environmentName }}
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: ${{ parameters.artifactName }}
+
+                # Optional: pull secrets from Key Vault (recommended)
+                # Requires service connection and KV name.
+                # - task: AzureKeyVault@2
+                #   inputs:
+                #     azureSubscription: "YOUR-AZURE-SERVICE-CONNECTION"
+                #     KeyVaultName: "YOUR-KEYVAULT-NAME"
+                #     SecretsFilter: "DATABRICKS-HOST,DATABRICKS-TOKEN,DATABRICKS-CLUSTER-ID"
+                #   displayName: "Fetch Databricks secrets"
+
+                - script: |
+                    chmod +x "$(Pipeline.Workspace)/${{ parameters.artifactName }}/scripts/databricks_deploy_job.sh"
+                    chmod +x "$(Pipeline.Workspace)/${{ parameters.artifactName }}/scripts/databricks_run_job.sh"
+                  displayName: "Make scripts executable"
+
+                - script: |
+                    ART_DIR="$(Pipeline.Workspace)/${{ parameters.artifactName }}"
+                    WHEEL_PATH="$(ls -1 ${ART_DIR}/dist/*.whl | head -n 1)"
+                    echo "Wheel: ${WHEEL_PATH}"
+
+                    # Required env vars:
+                    #   DATABRICKS_HOST, DATABRICKS_TOKEN
+                    # Optional:
+                    #   DATABRICKS_CLUSTER_ID (existing cluster id)
+                    #   DATABRICKS_JOB_ID (if you already created it once and just want run)
+                    #
+                    # You can set these in variable groups per environment.
+
+                    export DATABRICKS_HOST="$(DATABRICKS_HOST)"
+                    export DATABRICKS_TOKEN="$(DATABRICKS_TOKEN)"
+                    export DATABRICKS_CLUSTER_ID="$(DATABRICKS_CLUSTER_ID)"
+
+                    # Where to upload wheel in DBFS
+                    export DBFS_WHEEL_PATH="dbfs:/FileStore/etl/${{ parameters.environmentName }}/$(Build.BuildNumber)/$(basename ${WHEEL_PATH})"
+
+                    # Config path inside artifact
+                    export CONFIG_FILE="${ART_DIR}/${{ parameters.configRelPath }}"
+
+                    # Job name (unique per environment)
+                    export JOB_NAME="${{ parameters.databricksJobName }}-${{ parameters.environmentName }}"
+
+                    # Deploy / Update job
+                    "${ART_DIR}/scripts/databricks_deploy_job.sh" "${WHEEL_PATH}" "${DBFS_WHEEL_PATH}" "${ART_DIR}/databricks/job-definition.json" "${CONFIG_FILE}" "${JOB_NAME}"
+
+                  displayName: "Deploy/Update Databricks Job"
+
+                - script: |
+                    ART_DIR="$(Pipeline.Workspace)/${{ parameters.artifactName }}"
+                    export DATABRICKS_HOST="$(DATABRICKS_HOST)"
+                    export DATABRICKS_TOKEN="$(DATABRICKS_TOKEN)"
+                    export JOB_NAME="${{ parameters.databricksJobName }}-${{ parameters.environmentName }}"
+                    "${ART_DIR}/scripts/databricks_run_job.sh" "${JOB_NAME}"
+                  displayName: "Run Databricks Job"

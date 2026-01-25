@@ -44,6 +44,14 @@ class SparkETLJob:
         for k, v in (s.options or {}).items():
             df = df.option(k, v)
         df = df.load(s.path)
+        
+    # ADD THIS METHOD RIGHT HERE (inside the class)
+    def _read_target_df(self) -> DataFrame:
+        if self.config.target.table:
+            return self.spark.table(self.config.target.table)
+        if self.config.target.path:
+            return self.spark.read.format("delta").load(self.config.target.path)
+        raise ValueError("Target is missing table/path; cannot run post DQ checks.")
 
         # Watermark filter (incremental ingestion)
         wm = self.config.watermark
