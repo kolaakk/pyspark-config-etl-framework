@@ -3,13 +3,14 @@ from __future__ import annotations
 import importlib
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
-
+from typing import Optional
 from etl_framework.config import JobConfig
 from etl_framework.strategies.write_strategy import run_write
 from etl_framework.strategies.merge_scd1 import run_merge_scd1
 from etl_framework.strategies.merge_scd2 import run_scd2
 from etl_framework.watermark import read_watermark, write_watermark
 from etl_framework.dq.runner import DQRunner
+from etl_framework.dq.runner import DQRunner, DQRunSummary
 
 
 
@@ -20,20 +21,47 @@ class SparkETLJob:
 
     def run(self) -> None:
         self._log("Starting")
-
+        
+        # 1) Read source
         df_in = self._read_source()
-
+        
+         # 2) Validate required columns early (fail fast)
         self._validate_required_columns(df_in)
-
+        
+        # 2) Transform
         df_out = self._apply_transform(df_in)
         df_out = self._post_transform(df_out)
-        # DQ PRE
-        self._run_dq(stage="pre", df=df_out, source_df=df_in)
 
+        # DQ PRE (on transformed dataframe, before writing)
+        pre_summary = self._run_dq(stage="pre", df=df_out, source_df=df_in)
+
+        # Optional: block immediately if PRE DQ fails (bank common)
+        if pre_summary and pre_summary.fail_count > 0:
+            raise RuntimeError(
+                f"PRE DQ failed (fails={pre_summary.fail_count}). run_id={pre_summary.run_id}"
+            )
+
+        # 4) Write / Merge (write | merge_scd1 | scd2)
         self._write_by_strategy(df_out)
-        # DQ POST (optional): run on same df_out or reload from target
-        self._run_dq(stage="post", df=df_out, source_df=df_in)
 
+        # DQ POST (optional): run on same df_out or reload from target
+        #self._run_dq(stage="post", df=df_out, source_df=df_in)
+        
+        # # POST DQ must read target
+        target_df = self._read_target_df()
+
+        post_summary = self._run_dq(stage="post", df=target_df, source_df=df_in)
+        
+        # # Publish guard: block if POST fails but PRE passed
+        guard = self.config.dq.publish_guard
+        if guard.enabled and guard.block_on_post_fail:
+            if post_summary and post_summary.fail_count > 0:
+                raise RuntimeError(
+                    f"POST DQ failed — blocking publish (fails={post_summary.fail_count}). "
+                    f"post_run_id={post_summary.run_id}"
+                )
+
+        #  Update watermark (if enabled)
         self._update_watermark(df_in)
 
         self._log("Finished")
@@ -99,21 +127,21 @@ class SparkETLJob:
             run_scd2(self.spark, df, self.config.target)
         else:
             raise ValueError(f"Unknown write_strategy: {strat}")
+    
+    def _read_target_df(self) -> DataFrame:
+        """
+        Read the Delta target after write/merge.
+        Used for POST DQ checks so we validate the actual persisted data.
+        """
+        if self.config.target.table:
+            return self.spark.table(self.config.target.table)
 
-    def _update_watermark(self, df_in: DataFrame) -> None:
-        wm = self.config.watermark
-        if not wm.enabled:
-            return
-        if not wm.column:
-            raise ValueError("watermark.enabled=true but watermark.column is missing.")
+        if self.config.target.path:
+            return self.spark.read.format("delta").load(self.config.target.path)
 
-        job_key = wm.job_key or self.config.job_name
-        max_val = df_in.select(F.max(F.col(wm.column)).alias("m")).collect()[0]["m"]
-        if max_val is not None:
-            write_watermark(self.spark, wm.metadata_table, job_key, str(max_val))
-            self._log(f"Watermark updated to: {max_val}")
-           
-    def _run_dq(self, stage: str, df: DataFrame, source_df: DataFrame) -> None:
+        raise ValueError("Target is missing table/path; cannot run post DQ checks.")
+    
+    def _run_dq(self, stage: str, df: DataFrame, source_df: DataFrame) -> Optional[DQRunSummary]:
         """
         Runs DQ checks for the given stage ("pre" or "post") if enabled in config.
         Writes:
@@ -147,6 +175,23 @@ class SparkETLJob:
             dq_config=self.config.dq,
             checks=checks,
         )
+
+        
+            
+    def _update_watermark(self, df_in: DataFrame) -> None:
+        wm = self.config.watermark
+        if not wm.enabled:
+            return
+        if not wm.column:
+            raise ValueError("watermark.enabled=true but watermark.column is missing.")
+
+        job_key = wm.job_key or self.config.job_name
+        max_val = df_in.select(F.max(F.col(wm.column)).alias("m")).collect()[0]["m"]
+        if max_val is not None:
+            write_watermark(self.spark, wm.metadata_table, job_key, str(max_val))
+            self._log(f"Watermark updated to: {max_val}")
+           
+    
 
     
     def _log(self, msg: str) -> None:

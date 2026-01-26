@@ -125,6 +125,15 @@ class DQConfig:
     post_checks: List[Dict[str, Any]] = field(default_factory=list)
 
 @dataclass
+class DQPublishGuard:
+    """
+    Controls whether the job should be blocked after persistence
+    if POST DQ checks fail.
+    """
+    enabled: bool = False
+    block_on_post_fail: bool = True
+
+@dataclass
 class JobConfig:
     job_name: str
     source: SourceConfig
@@ -207,6 +216,12 @@ def load_config(config_path: str) -> JobConfig:
         # if empty id, treat as None
         if not rule_set.rule_set_id:
             rule_set = None
+        # ---- DQ publish guard ----
+    guard_raw = dq_raw.get("publish_guard", {}) or {}
+    publish_guard = DQPublishGuard(
+        enabled=bool(guard_raw.get("enabled", False)),
+        block_on_post_fail=bool(guard_raw.get("block_on_post_fail", True)),
+    )
 
     dq = DQConfig(
         enabled=bool(dq_raw.get("enabled", False)),
@@ -220,6 +235,7 @@ def load_config(config_path: str) -> JobConfig:
         quarantine=quarantine,
         fail_fast=bool(dq_raw.get("fail_fast", False)),
         failed_sample_limit=int(dq_raw.get("failed_sample_limit", 50)),
+        publish_guard=publish_guard,
         pre_checks=dq_raw.get("pre_checks", []),
         post_checks=dq_raw.get("post_checks", []),
     )
