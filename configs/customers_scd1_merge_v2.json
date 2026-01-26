@@ -60,7 +60,11 @@
       },
   
       "failed_sample_limit": 200,
-  
+      
+      "publish_guard": {
+        "enabled": true,
+        "block_on_post_fail": true
+      },
       "pre_checks": [],
       "post_checks": []
     },
