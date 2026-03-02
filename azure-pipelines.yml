@@ -8,61 +8,209 @@ pr:
     include:
       - main
 
+parameters:
+  - name: configFiles
+    type: object
+    default:
+      - customers_scd1_merge.json
+
+  - name: promoteConfigFile
+    type: string
+    default: customers_scd1_merge.json
+
+  - name: promoteAll
+    type: boolean
+    default: "false"
+
+  - name: runIntegrationTestsDev
+    type: boolean
+    default: "true"
+
+  - name: runIntegrationTestsTest
+    type: boolean
+    default: "true"
+
+  - name: runIntegrationTestsAcc
+    type: boolean
+    default: "true"
+
+  - name: runIntegrationTestsProd
+    type: boolean
+    default: "false"
+
 variables:
-  # Artifact name
   ARTIFACT_NAME: "etl_artifact"
-
-  # Wheel dist folder name
-  DIST_DIR: "dist"
-
-  # Databricks job name base
-  DATABRICKS_JOB_NAME: "pyspark-config-etl-framework"
-
-  # Config file to run (relative inside artifact)
-  CONFIG_REL_PATH: "configs/ENV/customers_scd1_merge.json"
+  DATABRICKS_JOB_NAME_BASE: "pyspark-config-etl-framework"
+  promoteAll: ${{ parameters.promoteAll }}
 
 stages:
   - stage: Build
-    displayName: "Build & Publish Artifact"
+    displayName: "Build + Unit Tests + SonarQube + Artifact"
     jobs:
       - job: BuildJob
-        displayName: "Build wheel + package configs"
         pool:
           vmImage: "ubuntu-latest"
         steps:
           - template: devops/templates/steps-build-artifact.yml
             parameters:
               artifactName: "$(ARTIFACT_NAME)"
-              distDir: "$(DIST_DIR)"
+              distDir: "dist"
 
-  - template: devops/templates/stage-deploy-databricks.yml
-    parameters:
-      stageName: Dev
-      environmentName: dev
-      artifactName: "$(ARTIFACT_NAME)"
-      databricksJobName: "$(DATABRICKS_JOB_NAME)"
-      configRelPath: "configs/dev/customers_scd1_merge.json"
+  # ----------------------------
+  # DEV: fan-out (matrix) using job
+  # ----------------------------
+  - stage: Dev
+    displayName: "DEV (fan-out parallel via matrix)"
+    dependsOn: Build
+    jobs:
+      - job: DevFanout
+        displayName: "DEV fan-out"
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          matrix:
+            ${{ each cfg in parameters.configFiles }}:
+              cfg_${{ replace(replace(replace(cfg, '.', '_'), '-', '_'), '/', '_') }}:
+                configRelPath: "configs/dev/${{ cfg }}"
+        steps:
+          - template: devops/templates/steps-deploy-databricks.yml
+            parameters:
+              environmentName: "dev"
+              artifactName: "$(ARTIFACT_NAME)"
+              databricksJobNameBase: "$(DATABRICKS_JOB_NAME_BASE)"
+              configRelPath: "$(configRelPath)"
+              runIntegrationTests: ${{ parameters.runIntegrationTestsDev }}
 
-  - template: devops/templates/stage-deploy-databricks.yml
-    parameters:
-      stageName: Test
-      environmentName: test
-      artifactName: "$(ARTIFACT_NAME)"
-      databricksJobName: "$(DATABRICKS_JOB_NAME)"
-      configRelPath: "configs/test/customers_scd1_merge.json"
+  # ----------------------------
+  # TEST
+  # ----------------------------
+  - stage: Test
+    displayName: "TEST"
+    dependsOn: Dev
+    jobs:
+      # Promote ALL (optional) - matrix job
+      - job: TestPromoteAll
+        displayName: "TEST promote ALL"
+        condition: eq(variables['promoteAll'], true)
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          matrix:
+            ${{ each cfg in parameters.configFiles }}:
+              cfg_${{ replace(replace(replace(cfg, '.', '_'), '-', '_'), '/', '_') }}:
+                configRelPath: "configs/test/${{ cfg }}"
+        steps:
+          - template: devops/templates/steps-deploy-databricks.yml
+            parameters:
+              environmentName: "test"
+              artifactName: "$(ARTIFACT_NAME)"
+              databricksJobNameBase: "$(DATABRICKS_JOB_NAME_BASE)"
+              configRelPath: "$(configRelPath)"
+              runIntegrationTests: ${{ parameters.runIntegrationTestsTest }}
 
-  - template: devops/templates/stage-deploy-databricks.yml
-    parameters:
-      stageName: Acceptance
-      environmentName: acc
-      artifactName: "$(ARTIFACT_NAME)"
-      databricksJobName: "$(DATABRICKS_JOB_NAME)"
-      configRelPath: "configs/acc/customers_scd1_merge.json"
+      # Promote SINGLE - deployment job (supports environment approvals)
+      - deployment: TestPromoteSingle
+        displayName: "TEST promote SINGLE"
+        environment: test
+        condition: eq(variables['promoteAll'], false)
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: devops/templates/steps-deploy-databricks.yml
+                  parameters:
+                    environmentName: "test"
+                    artifactName: "$(ARTIFACT_NAME)"
+                    databricksJobNameBase: "$(DATABRICKS_JOB_NAME_BASE)"
+                    configRelPath: "configs/test/${{ parameters.promoteConfigFile }}"
+                    runIntegrationTests: ${{ parameters.runIntegrationTestsTest }}
 
-  - template: devops/templates/stage-deploy-databricks.yml
-    parameters:
-      stageName: Production
-      environmentName: prod
-      artifactName: "$(ARTIFACT_NAME)"
-      databricksJobName: "$(DATABRICKS_JOB_NAME)"
-      configRelPath: "configs/prod/customers_scd1_merge.json"
+  # ----------------------------
+  # ACCEPTANCE
+  # ----------------------------
+  - stage: Acceptance
+    displayName: "ACCEPTANCE"
+    dependsOn: Test
+    jobs:
+      - job: AccPromoteAll
+        displayName: "ACC promote ALL"
+        condition: eq(variables['promoteAll'], true)
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          matrix:
+            ${{ each cfg in parameters.configFiles }}:
+              cfg_${{ replace(replace(replace(cfg, '.', '_'), '-', '_'), '/', '_') }}:
+                configRelPath: "configs/acc/${{ cfg }}"
+        steps:
+          - template: devops/templates/steps-deploy-databricks.yml
+            parameters:
+              environmentName: "acc"
+              artifactName: "$(ARTIFACT_NAME)"
+              databricksJobNameBase: "$(DATABRICKS_JOB_NAME_BASE)"
+              configRelPath: "$(configRelPath)"
+              runIntegrationTests: ${{ parameters.runIntegrationTestsAcc }}
+
+      - deployment: AccPromoteSingle
+        displayName: "ACC promote SINGLE"
+        environment: acc
+        condition: eq(variables['promoteAll'], false)
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: devops/templates/steps-deploy-databricks.yml
+                  parameters:
+                    environmentName: "acc"
+                    artifactName: "$(ARTIFACT_NAME)"
+                    databricksJobNameBase: "$(DATABRICKS_JOB_NAME_BASE)"
+                    configRelPath: "configs/acc/${{ parameters.promoteConfigFile }}"
+                    runIntegrationTests: ${{ parameters.runIntegrationTestsAcc }}
+
+  # ----------------------------
+  # PRODUCTION
+  # ----------------------------
+  - stage: Production
+    displayName: "PRODUCTION"
+    dependsOn: Acceptance
+    jobs:
+      - job: ProdPromoteAll
+        displayName: "PROD promote ALL"
+        condition: eq(variables['promoteAll'], true)
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          matrix:
+            ${{ each cfg in parameters.configFiles }}:
+              cfg_${{ replace(replace(replace(cfg, '.', '_'), '-', '_'), '/', '_') }}:
+                configRelPath: "configs/prod/${{ cfg }}"
+        steps:
+          - template: devops/templates/steps-deploy-databricks.yml
+            parameters:
+              environmentName: "prod"
+              artifactName: "$(ARTIFACT_NAME)"
+              databricksJobNameBase: "$(DATABRICKS_JOB_NAME_BASE)"
+              configRelPath: "$(configRelPath)"
+              runIntegrationTests: ${{ parameters.runIntegrationTestsProd }}
+
+      - deployment: ProdPromoteSingle
+        displayName: "PROD promote SINGLE"
+        environment: prod
+        condition: eq(variables['promoteAll'], false)
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: devops/templates/steps-deploy-databricks.yml
+                  parameters:
+                    environmentName: "prod"
+                    artifactName: "$(ARTIFACT_NAME)"
+                    databricksJobNameBase: "$(DATABRICKS_JOB_NAME_BASE)"
+                    configRelPath: "configs/prod/${{ parameters.promoteConfigFile }}"
+                    runIntegrationTests: ${{ parameters.runIntegrationTestsProd }}
