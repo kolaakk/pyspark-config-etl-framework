@@ -10,14 +10,46 @@ steps:
 
   - script: |
       python -m pip install --upgrade pip
+      pip install -r requirements-dev.txt
       pip install build
-    displayName: "Install build tooling"
+    displayName: "Install build + test dependencies"
 
+  # --- SonarQube: Prepare (requires a SonarQube service connection) ---
+  - task: SonarQubePrepare@5
+    displayName: "Prepare SonarQube analysis"
+    inputs:
+      SonarQube: "SonarQubeServiceConnection"   # <-- create this in Azure DevOps
+      scannerMode: "CLI"
+      configMode: "manual"
+      cliProjectKey: "pyspark-config-etl-framework"
+      cliProjectName: "pyspark-config-etl-framework"
+      cliSources: "src"
+      extraProperties: |
+        sonar.tests=tests
+        sonar.python.coverage.reportPaths=coverage.xml
+        sonar.exclusions=**/__pycache__/**,**/*.ipynb
+
+  # --- Unit tests with coverage ---
+  - script: |
+      pytest tests/unit --cov=src --cov-report=xml:coverage.xml
+    displayName: "Run unit tests (pytest) + coverage"
+
+  # --- SonarQube: Analyze + Publish Quality Gate ---
+  - task: SonarQubeAnalyze@5
+    displayName: "Run SonarQube analysis"
+
+  - task: SonarQubePublish@5
+    displayName: "Publish SonarQube Quality Gate"
+    inputs:
+      pollingTimeoutSec: "300"
+
+  # --- Build wheel ---
   - script: |
       python -m build --wheel
       ls -lah dist
     displayName: "Build wheel"
 
+  # --- Package artifact ---
   - script: |
       chmod +x devops/scripts/package_artifact.sh
       devops/scripts/package_artifact.sh "$(Build.SourcesDirectory)" "$(Build.ArtifactStagingDirectory)"
