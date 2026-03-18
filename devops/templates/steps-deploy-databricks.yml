@@ -1,0 +1,78 @@
+parameters:
+  environmentName: ""
+  artifactName: ""
+  databricksJobNameBase: ""
+  configRelPath: ""
+  runIntegrationTests: true
+
+steps:
+  - checkout: self
+    displayName: "Checkout repository"
+
+  - download: current
+    artifact: ${{ parameters.artifactName }}
+    displayName: "Download build artifact"
+
+  - script: |
+      set -e
+      chmod +x "$(Pipeline.Workspace)/${{ parameters.artifactName }}/scripts/databricks_deploy_job.sh"
+      chmod +x "$(Pipeline.Workspace)/${{ parameters.artifactName }}/scripts/databricks_run_job.sh"
+    displayName: "Make deployment scripts executable"
+
+  - script: |
+      set -euo pipefail
+
+      ART_DIR="$(Pipeline.Workspace)/${{ parameters.artifactName }}"
+      WHEEL_PATH="$(ls -1 ${ART_DIR}/dist/*.whl | head -n 1)"
+
+      echo "Artifact directory: ${ART_DIR}"
+      echo "Wheel path: ${WHEEL_PATH}"
+
+      export DATABRICKS_HOST="$(DATABRICKS_HOST)"
+      export DATABRICKS_TOKEN="$(DATABRICKS_TOKEN)"
+      export DATABRICKS_CLUSTER_ID="$(DATABRICKS_CLUSTER_ID)"
+
+      export DBFS_WHEEL_PATH="dbfs:/FileStore/etl/${{ parameters.environmentName }}/$(Build.BuildNumber)/$(basename ${WHEEL_PATH})"
+      export CONFIG_FILE="${ART_DIR}/${{ parameters.configRelPath }}"
+
+      # Unique job name per env + config name
+      CFG_NAME="$(basename "${{ parameters.configRelPath }}" .json)"
+      export JOB_NAME="${{ parameters.databricksJobNameBase }}-${{ parameters.environmentName }}-${CFG_NAME}"
+
+      "${ART_DIR}/scripts/databricks_deploy_job.sh" \
+        "${WHEEL_PATH}" \
+        "${DBFS_WHEEL_PATH}" \
+        "${ART_DIR}/databricks/job-definition.json" \
+        "${CONFIG_FILE}" \
+        "${JOB_NAME}"
+    displayName: "Deploy/Update Databricks Job"
+
+  - script: |
+      set -euo pipefail
+      ART_DIR="$(Pipeline.Workspace)/${{ parameters.artifactName }}"
+
+      export DATABRICKS_HOST="$(DATABRICKS_HOST)"
+      export DATABRICKS_TOKEN="$(DATABRICKS_TOKEN)"
+
+      CFG_NAME="$(basename "${{ parameters.configRelPath }}" .json)"
+      export JOB_NAME="${{ parameters.databricksJobNameBase }}-${{ parameters.environmentName }}-${CFG_NAME}"
+
+      "${ART_DIR}/scripts/databricks_run_job.sh" "${JOB_NAME}"
+    displayName: "Run Databricks Job"
+
+  # ✅ Integration tests: compile-time condition (no boolean/string issues)
+  - ${{ if eq(parameters.runIntegrationTests, true) }}:
+    - script: |
+        set -euo pipefail
+
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+
+        export DATABRICKS_HOST="$(DATABRICKS_HOST)"
+        export DATABRICKS_TOKEN="$(DATABRICKS_TOKEN)"
+
+        CFG_NAME="$(basename "${{ parameters.configRelPath }}" .json)"
+        export DATABRICKS_JOB_NAME="${{ parameters.databricksJobNameBase }}-${{ parameters.environmentName }}-${CFG_NAME}"
+
+        pytest -m integration tests/integration
+      displayName: "Integration tests (Databricks)"

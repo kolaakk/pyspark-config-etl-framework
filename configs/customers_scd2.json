@@ -5,6 +5,7 @@
       "path": "/mnt/landing/customers/",
       "options": {}
     },
+    
     "transform": {
       "function": "transformations.customer.transform",
       "params": {}
